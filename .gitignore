@@ -1,0 +1,42 @@
+# ---- Large data / model artifacts (keep out of git) ----
+clean_pairs_final.tsv
+*.tsv
+*.zip
+models/
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+ENV/
+
+# ---- Notebooks ----
+.ipynb_checkpoints/
+
+# ---- Gradio / runtime temp ----
+flagged/
+gradio_cached_examples/
+sinhala_srt_*/
+sinhala_src_*/
+
+# ---- IDE / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- Env / secrets ----
+.env
+*.local
