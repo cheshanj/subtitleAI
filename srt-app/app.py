@@ -191,7 +191,7 @@ def build_app() -> gr.Blocks:
     import torch  # local import so the module imports even without a GPU stack
 
     default_batch = 16 if torch.cuda.is_available() else 4
-    with gr.Blocks(title="Sinhala Subtitle Translator", theme=THEME) as demo:
+    with gr.Blocks(title="Sinhala Subtitle Translator") as demo:
         source_state = gr.State(value="")
 
         gr.Markdown("## 🎬 Sinhala Subtitle Translator")
@@ -262,4 +262,5 @@ def build_app() -> gr.Blocks:
 
 
 if __name__ == "__main__":
-    build_app().queue().launch(inbrowser=True)
+    # Gradio 6 takes theme at launch() rather than on Blocks().
+    build_app().queue().launch(theme=THEME, inbrowser=True)
