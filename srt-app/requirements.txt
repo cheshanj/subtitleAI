@@ -1,6 +1,9 @@
-gradio>=4.44.0
-pysubs2>=1.6.1
-torch
-transformers>=4.44.0
-sentencepiece>=0.2.0
-accelerate>=0.34.0
+# Pinned to versions verified working together (Python 3.10, Windows).
+# Majors are pinned deliberately: Gradio 6 moved the theme= arg to launch(),
+# so a 5.x/7.x jump can break the app. Bump intentionally, then re-test.
+gradio~=6.20
+pysubs2~=1.8
+torch~=2.13
+transformers~=5.14
+sentencepiece~=0.2.2
+accelerate~=1.14
