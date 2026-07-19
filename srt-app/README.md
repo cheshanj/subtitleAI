@@ -56,3 +56,13 @@ A browser tab opens automatically at the local Gradio URL.
 - First translation loads the model (cold start of ~10–30s); it's cached after.
 - GPU is used automatically when available (fp16), else CPU (fp32).
 - Skipped credit/watermark lines keep their original text in the output.
+
+## License & notices
+
+App code: [MIT](../LICENSE) © 2026 cheshanj.
+
+⚠️ The **NLLB-200 model** this app runs is licensed **CC-BY-NC 4.0
+(non-commercial)** by Meta AI — commercial use is not permitted, and this applies
+to any model fine-tuned from it. Full third-party notices and attribution are in
+the [project README](../README.md#third-party-notices--attribution).
+

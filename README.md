@@ -49,4 +49,65 @@ data and large binaries don't belong in a code repo. To reproduce:
 
 ## License
 
-[MIT](LICENSE) © cheshanj
+The **code** in this repository is released under the [MIT License](LICENSE).
+
+```
+Copyright (c) 2026 cheshanj
+```
+
+> **Important — the model is not MIT.** The MIT license covers this repository's
+> source code only. It does **not** cover the NLLB-200 model weights, any model
+> you fine-tune from them, or the training data. See "Third-party notices" below.
+
+## Third-party notices & attribution
+
+This project builds on the following works. You are responsible for complying
+with each of their licenses when you use, fine-tune, or distribute derivatives.
+
+| Component | Author | License | Notes |
+|-----------|--------|---------|-------|
+| [NLLB-200](https://huggingface.co/facebook/nllb-200-distilled-600M) | Meta AI | **CC-BY-NC 4.0** | **Non-commercial only.** Fine-tuned derivatives inherit this restriction. |
+| [Transformers](https://github.com/huggingface/transformers) | Hugging Face | Apache-2.0 | |
+| [PyTorch](https://pytorch.org/) | PyTorch / Linux Foundation | BSD-3-Clause | |
+| [Gradio](https://www.gradio.app/) | Hugging Face | Apache-2.0 | |
+| [pysubs2](https://github.com/tkarabela/pysubs2) | Tomáš Karabela | MIT | |
+| [SentencePiece](https://github.com/google/sentencepiece) | Google | Apache-2.0 | |
+
+### ⚠️ NLLB-200 non-commercial restriction
+
+NLLB-200 is distributed under **Creative Commons Attribution-NonCommercial 4.0
+International (CC-BY-NC 4.0)**. This means:
+
+- ✅ Research, personal, and educational use is permitted.
+- ❌ **Commercial use is not permitted** — this includes selling translations,
+  paid services, or any revenue-generating deployment built on the model or a
+  model fine-tuned from it.
+- 📌 A model you fine-tune from NLLB-200 is a derivative work and remains subject
+  to CC-BY-NC 4.0. Redistributing it must preserve the same license and
+  attribution to Meta AI.
+
+If you need commercial use, replace NLLB-200 with a permissively licensed model.
+
+### Attribution (NLLB)
+
+> NLLB Team et al. *No Language Left Behind: Scaling Human-Centered Machine
+> Translation.* Meta AI, 2022. https://arxiv.org/abs/2207.04672
+
+```bibtex
+@article{nllb2022,
+  title   = {No Language Left Behind: Scaling Human-Centered Machine Translation},
+  author  = {{NLLB Team} and Costa-juss{\`a}, Marta R. and others},
+  year    = {2022},
+  journal = {arXiv preprint arXiv:2207.04672}
+}
+```
+
+## Disclaimer
+
+This software is provided "as is", without warranty of any kind, express or
+implied. Machine translation output may contain errors; review translations
+before relying on them. The author is not responsible for how translated
+subtitles or trained models are used, nor for any content you translate — you
+are responsible for holding the rights to any subtitle files you process and for
+complying with all applicable third-party licenses listed above.
+
