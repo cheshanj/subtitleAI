@@ -40,3 +40,9 @@ Thumbs.db
 # ---- Env / secrets ----
 .env
 *.local
+
+# ---- Editor backups / scratch ----
+*.bak
+.ui_*.png
+.shot*.py
+.probe.py
