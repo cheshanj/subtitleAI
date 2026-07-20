@@ -145,10 +145,11 @@ def _load_model_cached(model_dir: str):
 
     tokenizer = AutoTokenizer.from_pretrained(str(model_path), local_files_only=True)
     dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+    # transformers 5 renamed torch_dtype -> dtype.
     model = AutoModelForSeq2SeqLM.from_pretrained(
         str(model_path),
         local_files_only=True,
-        torch_dtype=dtype,
+        dtype=dtype,
     )
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)

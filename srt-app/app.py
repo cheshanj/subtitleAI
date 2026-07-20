@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import os
+import queue
 import shutil
 import tempfile
 import threading
@@ -61,7 +62,6 @@ def translate(
     skip_credits,
     wrap_lines,
     fix_spacing,
-    progress=gr.Progress(),
 ):
     global _active_cancel
     if not srt_file:
@@ -102,30 +102,73 @@ def translate(
         to_translate_idx.append(i)
         to_translate_txt.append(text)
 
-    progress(0.0, desc="Loading model…")
+    total = len(to_translate_txt)
 
-    def on_progress(frac, msg):
-        progress(frac, desc=msg)
+    # Show the loading bar immediately (indeterminate while the model loads).
+    yield (
+        gr.update(),                              # preview (unchanged)
+        gr.update(),                              # output_file
+        "⏳ Loading model…",                       # status
+        gr.update(),                              # source_state
+        gr.update(visible=True),                  # empty_state stays until done
+        gr.update(interactive=False),             # export_btn
+        gr.update(value=_progress_html(0, total, "Loading model…"), visible=True),
+    )
 
-    try:
-        translated = translator.translate_batches(
-            to_translate_txt,
-            model_dir=model_dir,
-            batch_size=max(1, int(batch_size)),
-            num_beams=max(1, int(num_beams)),
-            max_new_tokens=max(16, int(max_new_tokens)),
-            progress=on_progress,
-            cancel=my_cancel.is_set,
+    # Run the (blocking) translation in a worker thread and stream progress from
+    # a queue so the UI updates live with "N / total lines".
+    events: "queue.Queue" = queue.Queue()
+    result: dict = {}
+
+    def worker():
+        def on_progress(frac, msg):
+            events.put(("progress", frac, msg))
+        try:
+            out = translator.translate_batches(
+                to_translate_txt,
+                model_dir=model_dir,
+                batch_size=max(1, int(batch_size)),
+                num_beams=max(1, int(num_beams)),
+                max_new_tokens=max(16, int(max_new_tokens)),
+                progress=on_progress,
+                cancel=my_cancel.is_set,
+            )
+            result["translated"] = out
+        except translator.TranslationCancelled:
+            result["cancelled"] = True
+        except Exception as exc:  # surface model/runtime errors to the UI
+            result["error"] = str(exc)
+        finally:
+            events.put(("done", None, None))
+
+    thr = threading.Thread(target=worker, daemon=True)
+    thr.start()
+
+    # Drain progress events until the worker signals done.
+    while True:
+        kind, frac, msg = events.get()
+        if kind == "done":
+            break
+        yield (
+            gr.update(), gr.update(),
+            f"⏳ {msg}", gr.update(),
+            gr.update(visible=True), gr.update(interactive=False),
+            gr.update(value=_progress_html(frac, total, msg), visible=True),
         )
-    except translator.TranslationCancelled:
-        return (
-            gr.update(value=[], visible=False),  # preview
-            None,                                 # output_file
-            "⏹️ Translation cancelled.",          # status
-            "",                                   # source_state
-            gr.update(visible=True),              # empty_state (show again)
-            gr.update(interactive=False),         # export_btn (disable)
+    thr.join()
+
+    if result.get("cancelled"):
+        yield (
+            gr.update(value=[], visible=False), None,
+            "⏹️ Translation cancelled.", "",
+            gr.update(visible=True), gr.update(interactive=False),
+            gr.update(visible=False),
         )
+        return
+    if result.get("error"):
+        raise gr.Error(f"Translation failed: {result['error']}")
+
+    translated = result["translated"]
 
     # Build the editable table: one row per event. Untranslated lines show blank
     # Sinhala so the user can see they were skipped.
@@ -142,13 +185,14 @@ def translate(
         f"Format: {subs.fmt}. Edit any row below, then re-export."
     )
     # Stash the loaded file path so export can reload it (state carries the path).
-    return (
+    yield (
         gr.update(value=rows, visible=True),   # preview
         draft_path,                            # output_file
         summary,                               # status
         str(subs.source_path),                 # source_state
         gr.update(visible=False),              # empty_state (hide)
         gr.update(interactive=True),           # export_btn (enable)
+        gr.update(visible=False),              # progress bar (hide)
     )
 
 
@@ -225,7 +269,8 @@ THEME = gr.themes.Soft(
 # Custom CSS — glass cards, gradient hero, numbered steps, glow buttons.
 # ---------------------------------------------------------------------------
 CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&display=swap');
+/* Headings use a display-ish stack with no external @import — an external font
+   import blocks first paint and leaves the loading screen up longer. */
 
 /* ---------- Theme tokens: light defaults, dark overrides ---------- */
 .gradio-container {
@@ -258,7 +303,15 @@ CSS = """
 }
 
 body, .gradio-container { background: var(--app-bg) !important; background-attachment: fixed !important; }
-.gradio-container { max-width: 1220px !important; }
+.gradio-container {
+    max-width: 1220px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}
+/* Gradio 6 can left-align the app's inner wrapper; force it centred. */
+.gradio-container > .main,
+.gradio-container .wrap > .contain,
+.gradio-container .fillable { margin-left: auto !important; margin-right: auto !important; width: 100% !important; }
 
 /* Strip Gradio's default chrome from the COLUMN that wraps each glass card,
    so we see only one card, not a card inside a bordered column. */
@@ -275,7 +328,7 @@ body, .gradio-container { background: var(--app-bg) !important; background-attac
 /* ---------- Hero header ---------- */
 .hero { text-align: center; padding: 14px 0 2px; }
 .hero h1 {
-    font-family: 'Sora', sans-serif; font-weight: 800; font-size: 2.35rem;
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; font-weight: 800; font-size: 2.35rem;
     margin: 0 0 8px; letter-spacing: -0.02em;
     background: linear-gradient(135deg, #6366f1 0%, #a855f7 55%, #d946ef 100%);
     -webkit-background-clip: text; background-clip: text; color: transparent;
@@ -320,12 +373,12 @@ body, .gradio-container { background: var(--app-bg) !important; background-attac
 .step-heading .step-badge {
     flex: 0 0 auto; width: 30px; height: 30px; border-radius: 999px;
     display: flex; align-items: center; justify-content: center;
-    font-family: 'Sora', sans-serif; font-weight: 700; font-size: 0.9rem; color: #fff;
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; font-weight: 700; font-size: 0.9rem; color: #fff;
     background: linear-gradient(135deg, #6366f1, #a855f7);
     box-shadow: 0 4px 14px rgba(99, 102, 241, 0.45);
 }
 .step-heading .step-title {
-    font-family: 'Sora', sans-serif; font-weight: 700; font-size: 1.08rem;
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; font-weight: 700; font-size: 1.08rem;
     color: var(--text-strong);
 }
 .step-heading .step-sub { font-size: 0.82rem; color: var(--text-muted); font-weight: 400; margin-left: 4px; }
@@ -368,12 +421,42 @@ body, .gradio-container { background: var(--app-bg) !important; background-attac
 .review-table table { border-radius: 14px !important; overflow: hidden; }
 .review-table thead th {
     background: var(--accent-soft-bg) !important; color: var(--accent-text) !important;
-    font-family: 'Sora', sans-serif; font-weight: 600 !important;
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; font-weight: 600 !important;
 }
 
 /* ---------- Compact download box (avoid a huge empty dropzone) ---------- */
 .download-box .empty { min-height: 0 !important; padding: 8px 0 !important; }
 .download-box [data-testid="block-label"] { margin-bottom: 4px; }
+
+/* ---------- Progress bar ---------- */
+.pbar-wrap { margin: 6px 0 2px; }
+.pbar-track {
+    position: relative; height: 10px; border-radius: 999px; overflow: hidden;
+    background: var(--card-border);
+}
+.pbar-fill {
+    height: 100%; border-radius: 999px;
+    background: linear-gradient(90deg, #6366f1, #a855f7, #d946ef);
+    background-size: 200% 100%;
+    transition: width .35s ease;
+    box-shadow: 0 0 12px rgba(129, 140, 248, 0.55);
+}
+.pbar-indeterminate { animation: pbar-slide 1.15s ease-in-out infinite; }
+@keyframes pbar-slide {
+    0%   { margin-left: -35%; }
+    100% { margin-left: 100%; }
+}
+.pbar-label {
+    margin-top: 8px; font-size: 0.86rem; font-weight: 600;
+    color: var(--accent-text); font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    display: flex; align-items: center; gap: 8px;
+}
+.pbar-label::before {
+    content: ""; width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid var(--accent-text); border-top-color: transparent;
+    animation: pbar-spin 0.7s linear infinite; flex: 0 0 auto;
+}
+@keyframes pbar-spin { to { transform: rotate(360deg); } }
 
 /* ---------- Empty state ---------- */
 .empty-state {
@@ -382,7 +465,7 @@ body, .gradio-container { background: var(--app-bg) !important; background-attac
     background: linear-gradient(180deg, var(--accent-soft-bg), transparent);
 }
 .empty-state .es-icon { font-size: 2.2rem; margin-bottom: 8px; opacity: .9; }
-.empty-state .es-title { font-family: 'Sora', sans-serif; font-weight: 700; color: var(--text-strong); font-size: 1.02rem; margin-bottom: 4px; }
+.empty-state .es-title { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; font-weight: 700; color: var(--text-strong); font-size: 1.02rem; margin-bottom: 4px; }
 .empty-state .es-sub { font-size: 0.88rem; line-height: 1.5; }
 
 footer { display: none !important; }
@@ -396,6 +479,23 @@ def _step_heading(number: str, title: str, subtitle: str = "") -> str:
         f'<span class="step-badge">{number}</span>'
         f'<span class="step-title">{title}</span>'
         f"{sub_html}"
+        "</div>"
+    )
+
+
+def _progress_html(frac, total, msg: str) -> str:
+    """A determinate progress bar; indeterminate shimmer when frac is 0/None."""
+    if frac and frac > 0:
+        pct = max(0, min(100, round(frac * 100)))
+        bar = f'<div class="pbar-fill" style="width:{pct}%"></div>'
+        label = f"{msg} · {pct}%"
+    else:
+        bar = '<div class="pbar-fill pbar-indeterminate" style="width:35%"></div>'
+        label = msg
+    return (
+        '<div class="pbar-wrap">'
+        f'<div class="pbar-track">{bar}</div>'
+        f'<div class="pbar-label">{label}</div>'
         "</div>"
     )
 
@@ -470,6 +570,7 @@ def build_app() -> gr.Blocks:
                         interactive=False,
                         elem_classes=["status-box"],
                     )
+                    progress_bar = gr.HTML(visible=False)
                     empty_state = gr.HTML(EMPTY_STATE_HTML)
                     preview = gr.Dataframe(
                         headers=["English", "Sinhala (editable)"],
@@ -500,7 +601,7 @@ def build_app() -> gr.Blocks:
                 srt_file, model_dir, batch_size, num_beams, max_new_tokens,
                 skip_credits, wrap_lines, fix_spacing,
             ],
-            outputs=[preview, output_file, status, source_state, empty_state, export_btn],
+            outputs=[preview, output_file, status, source_state, empty_state, export_btn, progress_bar],
         )
         # No cancels=[...]: translate() runs in a worker thread that Gradio can't
         # kill, so cancellation is cooperative via the per-run Event. Leaving the
