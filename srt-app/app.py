@@ -602,6 +602,9 @@ def build_app() -> gr.Blocks:
                 skip_credits, wrap_lines, fix_spacing,
             ],
             outputs=[preview, output_file, status, source_state, empty_state, export_btn, progress_bar],
+            # Hide Gradio's default per-component spinner/timer overlay so only
+            # our custom progress bar (progress_bar) is shown during the run.
+            show_progress="hidden",
         )
         # No cancels=[...]: translate() runs in a worker thread that Gradio can't
         # kill, so cancellation is cooperative via the per-run Event. Leaving the
