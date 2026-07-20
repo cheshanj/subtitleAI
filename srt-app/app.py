@@ -36,6 +36,23 @@ _cancel_lock = threading.Lock()
 _active_cancel: threading.Event | None = None
 
 
+# Human-readable dropdown labels -> internal device ids.
+_DEVICE_VALUES = {
+    "Auto (use GPU if available)": "auto",
+    "CPU": "cpu",
+    "GPU (CUDA)": "cuda",
+}
+
+
+def _device_choices_and_hint():
+    """Dropdown choices plus a one-line note on what hardware was detected."""
+    if translator.gpu_available():
+        hint = f"✅ GPU detected: {translator.gpu_name()}"
+    else:
+        hint = "ℹ️ No CUDA GPU detected — CPU will be used. (GPU option needs a CUDA build of PyTorch.)"
+    return list(_DEVICE_VALUES.keys()), hint
+
+
 def _model_choices() -> list[str]:
     found = translator.discover_models(MODEL_SEARCH_DIRS)
     if DEFAULT_MODEL_DIR not in found and Path(DEFAULT_MODEL_DIR).exists():
@@ -62,6 +79,7 @@ def translate(
     skip_credits,
     wrap_lines,
     fix_spacing,
+    device,
 ):
     global _active_cancel
     if not srt_file:
@@ -71,6 +89,12 @@ def translate(
             f"Model folder not found: {model_dir}\n"
             "Copy your trained NLLB model folder there, or pick one from the dropdown."
         )
+    # Validate the device up front so "GPU unavailable" is a clean message.
+    device_choice = _DEVICE_VALUES.get(device, "auto")
+    try:
+        translator.resolve_device(device_choice)
+    except ValueError as exc:
+        raise gr.Error(str(exc))
 
     # Install this run's own cancel Event so Stop targets exactly this job.
     my_cancel = threading.Event()
@@ -130,6 +154,7 @@ def translate(
                 batch_size=max(1, int(batch_size)),
                 num_beams=max(1, int(num_beams)),
                 max_new_tokens=max(16, int(max_new_tokens)),
+                device=device_choice,
                 progress=on_progress,
                 cancel=my_cancel.is_set,
             )
@@ -546,6 +571,13 @@ def build_app() -> gr.Blocks:
                         value=_choices[0],
                         allow_custom_value=True,
                     )
+                    _dev_choices, _dev_hint = _device_choices_and_hint()
+                    device = gr.Dropdown(
+                        label="Device",
+                        choices=_dev_choices,
+                        value=_dev_choices[0],
+                        info=_dev_hint,
+                    )
 
                     gr.HTML(_step_heading("2", "Settings", "tune quality vs. speed"))
                     with gr.Accordion("Advanced settings", open=False):
@@ -599,7 +631,7 @@ def build_app() -> gr.Blocks:
             fn=translate,
             inputs=[
                 srt_file, model_dir, batch_size, num_beams, max_new_tokens,
-                skip_credits, wrap_lines, fix_spacing,
+                skip_credits, wrap_lines, fix_spacing, device,
             ],
             outputs=[preview, output_file, status, source_state, empty_state, export_btn, progress_bar],
             # Hide Gradio's default per-component spinner/timer overlay so only

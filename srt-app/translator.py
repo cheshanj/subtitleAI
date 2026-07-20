@@ -113,45 +113,78 @@ def discover_models(search_dirs: Iterable[Path]) -> list[str]:
     return unique
 
 
-def load_model(model_dir: str):
-    """Resolve the path first, then hit the (single-slot) cache.
+def gpu_available() -> bool:
+    """True if a CUDA device is usable with this PyTorch build."""
+    return torch.cuda.is_available()
+
+
+def gpu_name() -> str | None:
+    return torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
+
+
+def resolve_device(choice: str) -> str:
+    """Map a UI choice ('auto' | 'cpu' | 'cuda') to an actual torch device.
+
+    Raises ValueError if the user explicitly asked for CUDA but it isn't
+    available, so the UI can show a clear message instead of failing deep in
+    model.to().
+    """
+    choice = (choice or "auto").lower()
+    if choice == "cpu":
+        return "cpu"
+    if choice in ("cuda", "gpu"):
+        if not torch.cuda.is_available():
+            raise ValueError(
+                "GPU (CUDA) was requested but is not available. This PyTorch "
+                f"build is '{torch.__version__}'. Install a CUDA build of "
+                "PyTorch on a machine with an NVIDIA GPU, or choose CPU/Auto."
+            )
+        return "cuda"
+    # auto
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def load_model(model_dir: str, device: str = "auto"):
+    """Resolve the path + device first, then hit the (single-slot) cache.
 
     Resolving before caching means ``models\\x``, ``models/x`` and the absolute
     path are one key, not three. maxsize=1 keeps only one model resident; when
-    the user switches models the previous one is evicted and its GPU memory
-    reclaimed, so two big NLLB checkpoints never sit in VRAM at once.
+    the user switches models (or devices) the previous one is evicted and its
+    memory reclaimed, so two big NLLB checkpoints never sit in memory at once.
     """
     resolved = str(Path(model_dir).expanduser().resolve())
-    if resolved not in _current_key:
-        # Switching models: drop the old one and reclaim its memory first.
+    dev = resolve_device(device)
+    key = (resolved, dev)
+    if key not in _current_key:
+        # Switching model/device: drop the old one and reclaim memory first.
         _load_model_cached.cache_clear()
         _current_key.clear()
-        _current_key.add(resolved)
+        _current_key.add(key)
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-    return _load_model_cached(resolved)
+    return _load_model_cached(resolved, dev)
 
 
-# Tracks which resolved path is currently cached (maxsize=1 holds one model).
-_current_key: set[str] = set()
+# Tracks which (path, device) is currently cached (maxsize=1 holds one model).
+_current_key: set[tuple[str, str]] = set()
 
 
 @lru_cache(maxsize=1)
-def _load_model_cached(model_dir: str):
+def _load_model_cached(model_dir: str, device: str):
     model_path = Path(model_dir)
     if not model_path.exists():
         raise FileNotFoundError(f"Model folder not found: {model_path}")
 
     tokenizer = AutoTokenizer.from_pretrained(str(model_path), local_files_only=True)
-    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+    # fp16 only pays off on GPU; keep fp32 on CPU where fp16 is slow/unsupported.
+    dtype = torch.float16 if device == "cuda" else torch.float32
     # transformers 5 renamed torch_dtype -> dtype.
     model = AutoModelForSeq2SeqLM.from_pretrained(
         str(model_path),
         local_files_only=True,
         dtype=dtype,
     )
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
     model.eval()
     tokenizer.src_lang = SOURCE_LANG
@@ -165,18 +198,20 @@ def translate_batches(
     batch_size: int,
     num_beams: int,
     max_new_tokens: int,
+    device: str = "auto",
     progress: ProgressFn | None = None,
     cancel: CancelFn | None = None,
 ) -> list[str]:
     """Translate a flat list of source lines to Sinhala.
 
-    ``progress(fraction, message)`` is called after each batch. ``cancel()`` is
-    checked before each batch; returning True raises ``TranslationCancelled``.
+    ``device`` is 'auto' | 'cpu' | 'cuda'. ``progress(fraction, message)`` is
+    called after each batch. ``cancel()`` is checked before each batch;
+    returning True raises ``TranslationCancelled``.
     """
     if not texts:
         return []
 
-    tokenizer, model, forced_bos_token_id = load_model(model_dir)
+    tokenizer, model, forced_bos_token_id = load_model(model_dir, device)
     outputs: list[str] = []
     total = len(texts)
 
